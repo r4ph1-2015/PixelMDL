@@ -1,4 +1,4 @@
-name: SaaS CI/CD Pipeline (Zero Touch + Approval)
+name: SaaS Python Release Pipeline
 
 on:
   push:
@@ -11,14 +11,14 @@ permissions:
 jobs:
 
 # =========================
-# CI + VERSIONING
+# VERSION + BUILD
 # =========================
-  ci:
+  build:
     runs-on: ubuntu-latest
 
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      channel: ${{ steps.version.outputs.channel }}
+      version: ${{ steps.ver.outputs.version }}
+      channel: ${{ steps.ver.outputs.channel }}
 
     steps:
       - uses: actions/checkout@v4
@@ -34,14 +34,14 @@ jobs:
           pip install --upgrade pip
           pip install build pytest ruff
 
-      - name: Run tests
+      - name: Tests
         run: pytest || true
 
 # =========================
-# SAFE VERSION SYSTEM
+# VERSION SYSTEM (SAFE)
 # =========================
       - name: Generate version
-        id: version
+        id: ver
         run: |
           git fetch --tags
 
@@ -79,9 +79,9 @@ jobs:
           echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
 
 # =========================
-# BUILD
+# BUILD PACKAGE
 # =========================
-      - name: Build package
+      - name: Build
         run: python -m build
 
       - uses: actions/upload-artifact@v4
@@ -90,20 +90,19 @@ jobs:
           path: dist/
 
 # =========================
-# RELEASE (SAFE TAGGING)
+# TAG = VERSION (FIXED)
 # =========================
-  release:
-    needs: ci
+  tag:
+    needs: build
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set version
-        run: echo "VERSION=${{ needs.ci.outputs.version }}" >> $GITHUB_ENV
-
-      - name: Create tag safely
+      - name: Apply tag = version
         run: |
+          VERSION="${{ needs.build.outputs.version }}"
+
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
@@ -115,10 +114,26 @@ jobs:
           fi
 
 # =========================
-# TESTPYPI (NO APPROVAL)
+# GITHUB RELEASE (ALWAYS)
 # =========================
-  deploy_testpypi:
-    needs: ci
+  github_release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build.outputs.version }}
+          name: Release ${{ needs.build.outputs.version }}
+
+# =========================
+# TESTPYPI (ALWAYS)
+# =========================
+  testpypi:
+    needs: build
     runs-on: ubuntu-latest
 
     steps:
@@ -127,23 +142,22 @@ jobs:
           name: dist
           path: dist
 
-      - name: Publish to TestPyPI
+      - name: Publish TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
 
 # =========================
-# PYPI (REQUIRES APPROVAL)
+# PYPI (ONLY STABLE + APPROVAL)
 # =========================
-  deploy_pypi:
-    needs: ci
+  pypi:
+    needs: build
     runs-on: ubuntu-latest
 
-    # ONLY stable releases
-    if: ${{ !contains(needs.ci.outputs.version, 'a') && !contains(needs.ci.outputs.version, 'b') }}
+    if: ${{ !contains(needs.build.outputs.version, 'a') && !contains(needs.build.outputs.version, 'b') }}
 
     environment:
-      name: production  # 🔴 REQUIRED for approval + trusted publishing
+      name: production
 
     steps:
       - uses: actions/download-artifact@v4
@@ -151,5 +165,5 @@ jobs:
           name: dist
           path: dist
 
-      - name: Publish to PyPI (Trusted Publisher)
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
