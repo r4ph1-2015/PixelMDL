@@ -1,4 +1,4 @@
-name: SaaS Python CI/CD Pipeline
+name: SaaS CI/CD Pipeline (Zero Touch + Approval)
 
 on:
   push:
@@ -10,14 +10,15 @@ permissions:
 
 jobs:
 
-# ===========================
-# CI + VERSION + BUILD
-# ===========================
+# =========================
+# CI + VERSIONING
+# =========================
   ci:
     runs-on: ubuntu-latest
 
     outputs:
       version: ${{ steps.version.outputs.version }}
+      channel: ${{ steps.version.outputs.channel }}
 
     steps:
       - uses: actions/checkout@v4
@@ -28,20 +29,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install tools
         run: |
           pip install --upgrade pip
           pip install build pytest ruff
 
       - name: Run tests
-        run: pytest || echo "No tests found"
+        run: pytest || true
 
-      - name: Lint
-        run: ruff check . || true
-
-# ===========================
-# SAFE VERSIONING (NO CRASHES)
-# ===========================
+# =========================
+# SAFE VERSION SYSTEM
+# =========================
       - name: Generate version
         id: version
         run: |
@@ -54,7 +52,6 @@ jobs:
           fi
 
           V=${LAST#v}
-
           IFS='.' read -r major minor patch <<< "$V"
 
           [[ "$major" =~ ^[0-9]+$ ]] || major=0
@@ -65,33 +62,36 @@ jobs:
 
           MSG=$(git log -1 --pretty=%B)
 
+          CHANNEL="stable"
           SUFFIX=""
 
           if [[ "$MSG" == *"alpha"* ]]; then
+            CHANNEL="alpha"
             SUFFIX="a1"
           elif [[ "$MSG" == *"beta"* ]]; then
+            CHANNEL="beta"
             SUFFIX="b1"
           fi
 
           VERSION="v$major.$minor.$patch$SUFFIX"
 
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
 
-# ===========================
-# BUILD PACKAGE
-# ===========================
+# =========================
+# BUILD
+# =========================
       - name: Build package
         run: python -m build
 
-      - name: Upload dist
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
-# ===========================
+# =========================
 # RELEASE (SAFE TAGGING)
-# ===========================
+# =========================
   release:
     needs: ci
     runs-on: ubuntu-latest
@@ -99,13 +99,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Get version
+      - name: Set version
         run: echo "VERSION=${{ needs.ci.outputs.version }}" >> $GITHUB_ENV
-
-      - name: Create changelog
-        run: |
-          echo "## Release $VERSION" > CHANGELOG.md
-          git log -1 --pretty=format:"- %s" >> CHANGELOG.md
 
       - name: Create tag safely
         run: |
@@ -113,21 +108,15 @@ jobs:
           git config user.email "github-actions@github.com"
 
           if git rev-parse "$VERSION" >/dev/null 2>&1; then
-            echo "Tag already exists, skipping"
+            echo "Tag exists → skipping"
           else
             git tag "$VERSION"
             git push origin "$VERSION"
           fi
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.VERSION }}
-          body_path: CHANGELOG.md
-
-# ===========================
-# TESTPYPI (ALWAYS)
-# ===========================
+# =========================
+# TESTPYPI (NO APPROVAL)
+# =========================
   deploy_testpypi:
     needs: ci
     runs-on: ubuntu-latest
@@ -143,18 +132,18 @@ jobs:
         with:
           repository-url: https://test.pypi.org/legacy/
 
-# ===========================
-# PYPI (TRUSTED PUBLISHER FIX)
-# ===========================
+# =========================
+# PYPI (REQUIRES APPROVAL)
+# =========================
   deploy_pypi:
     needs: ci
     runs-on: ubuntu-latest
 
-    environment:
-      name: production   # ✅ FIX: required for trusted publisher
-
-    # Only stable releases go to PyPI
+    # ONLY stable releases
     if: ${{ !contains(needs.ci.outputs.version, 'a') && !contains(needs.ci.outputs.version, 'b') }}
+
+    environment:
+      name: production  # 🔴 REQUIRED for approval + trusted publishing
 
     steps:
       - uses: actions/download-artifact@v4
