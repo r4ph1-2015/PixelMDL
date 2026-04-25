@@ -11,10 +11,11 @@ permissions:
 jobs:
 
 # ===========================
-# 1. CI (TEST + BUILD)
+# CI (TEST + BUILD)
 # ===========================
   ci:
     runs-on: ubuntu-latest
+
     outputs:
       version: ${{ steps.version.outputs.version }}
 
@@ -39,7 +40,7 @@ jobs:
         run: ruff check . || true
 
 # ===========================
-# 2. VERSION GENERATION (SAFE + CLEAN)
+# VERSIONING (FIXED SAFE MODE)
 # ===========================
       - name: Generate version
         id: version
@@ -49,16 +50,12 @@ jobs:
           LAST=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           V=${LAST#v}
 
-          python - <<EOF > version.txt
-major, minor, patch = map(int, "$V".split("."))
-patch += 1
-print(f"v{major}.{minor}.{patch}")
-EOF
+          VERSION=$(python -c "major, minor, patch = map(int, '$V'.split('.')); patch += 1; print(f'v{major}.{minor}.{patch}')")
 
-          echo "version=$(cat version.txt)" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
 # ===========================
-# 3. BUILD ARTIFACT (IMMUTABLE)
+# BUILD ARTIFACT (IMMUTABLE)
 # ===========================
       - name: Build package
         run: python -m build
@@ -70,7 +67,7 @@ EOF
           path: dist/
 
 # ===========================
-# 4. RELEASE (TAG + CHANGELOG)
+# RELEASE (TAG + CHANGELOG)
 # ===========================
   release:
     needs: ci
@@ -98,7 +95,7 @@ EOF
           body_path: CHANGELOG.md
 
 # ===========================
-# 5. TESTPYPI (STAGING DEPLOY)
+# TESTPYPI (STAGING)
 # ===========================
   deploy_testpypi:
     needs: ci
@@ -117,12 +114,12 @@ EOF
           repository-url: https://test.pypi.org/legacy/
 
 # ===========================
-# 6. PYPI (PRODUCTION DEPLOY)
+# PYPI (PRODUCTION - APPROVAL)
 # ===========================
   deploy_pypi:
     needs: ci
     runs-on: ubuntu-latest
-    environment: release   # 🔒 manual approval required
+    environment: release
 
     steps:
       - uses: actions/download-artifact@v4
