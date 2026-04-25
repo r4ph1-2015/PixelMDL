@@ -1,4 +1,4 @@
-name: Python CI/CD (Alpha/Beta/Stable)
+name: SaaS Python CI/CD Pipeline
 
 on:
   push:
@@ -11,14 +11,13 @@ permissions:
 jobs:
 
 # ===========================
-# CI + BUILD + VERSION
+# CI + VERSION + BUILD
 # ===========================
   ci:
     runs-on: ubuntu-latest
 
     outputs:
       version: ${{ steps.version.outputs.version }}
-      channel: ${{ steps.version.outputs.channel }}
 
     steps:
       - uses: actions/checkout@v4
@@ -41,14 +40,13 @@ jobs:
         run: ruff check . || true
 
 # ===========================
-# VERSIONING (SAFE + ALPHA/BETA SUPPORT)
+# SAFE VERSIONING (NO CRASHES)
 # ===========================
       - name: Generate version
         id: version
         run: |
           git fetch --tags
 
-          # get latest valid tag only
           LAST=$(git tag -l "v[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | head -n 1)
 
           if [ -z "$LAST" ]; then
@@ -59,34 +57,28 @@ jobs:
 
           IFS='.' read -r major minor patch <<< "$V"
 
-          # safe fallback
           [[ "$major" =~ ^[0-9]+$ ]] || major=0
           [[ "$minor" =~ ^[0-9]+$ ]] || minor=0
           [[ "$patch" =~ ^[0-9]+$ ]] || patch=0
 
           patch=$((patch + 1))
 
-          # detect alpha/beta from commit message
           MSG=$(git log -1 --pretty=%B)
 
-          CHANNEL="stable"
           SUFFIX=""
 
           if [[ "$MSG" == *"alpha"* ]]; then
-            CHANNEL="alpha"
             SUFFIX="a1"
           elif [[ "$MSG" == *"beta"* ]]; then
-            CHANNEL="beta"
             SUFFIX="b1"
           fi
 
           VERSION="v$major.$minor.$patch$SUFFIX"
 
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
 
 # ===========================
-# BUILD
+# BUILD PACKAGE
 # ===========================
       - name: Build package
         run: python -m build
@@ -98,7 +90,7 @@ jobs:
           path: dist/
 
 # ===========================
-# RELEASE (TAG + GITHUB RELEASE)
+# RELEASE (SAFE TAGGING)
 # ===========================
   release:
     needs: ci
@@ -115,21 +107,26 @@ jobs:
           echo "## Release $VERSION" > CHANGELOG.md
           git log -1 --pretty=format:"- %s" >> CHANGELOG.md
 
-      - name: Create tag
+      - name: Create tag safely
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git tag $VERSION
-          git push origin $VERSION
 
-      - name: GitHub Release
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Tag already exists, skipping"
+          else
+            git tag "$VERSION"
+            git push origin "$VERSION"
+          fi
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
           body_path: CHANGELOG.md
 
 # ===========================
-# TESTPYPI (ALPHA/BETA ONLY)
+# TESTPYPI (ALWAYS)
 # ===========================
   deploy_testpypi:
     needs: ci
@@ -141,22 +138,23 @@ jobs:
           name: dist
           path: dist
 
-      - name: Publish to TestPyPI (alpha/beta/stable staging)
+      - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
 
 # ===========================
-# PYPI (ONLY STABLE RELEASES)
+# PYPI (TRUSTED PUBLISHER FIX)
 # ===========================
   deploy_pypi:
     needs: ci
     runs-on: ubuntu-latest
 
-    # only publish stable versions (no alpha/beta)
-    if: ${{ !contains(needs.ci.outputs.version, 'a') && !contains(needs.ci.outputs.version, 'b') }}
+    environment:
+      name: production   # ✅ FIX: required for trusted publisher
 
-    environment: release
+    # Only stable releases go to PyPI
+    if: ${{ !contains(needs.ci.outputs.version, 'a') && !contains(needs.ci.outputs.version, 'b') }}
 
     steps:
       - uses: actions/download-artifact@v4
@@ -164,5 +162,5 @@ jobs:
           name: dist
           path: dist
 
-      - name: Publish to PyPI
+      - name: Publish to PyPI (Trusted Publisher)
         uses: pypa/gh-action-pypi-publish@release/v1
