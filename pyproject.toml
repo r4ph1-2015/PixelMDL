@@ -1,0 +1,6 @@
+[project]
+name = "PixelMDL"
+version = "0.02"
+
+[tool.setuptools]
+packages = ["pixelmdl"]
