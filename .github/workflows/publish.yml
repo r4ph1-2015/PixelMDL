@@ -1,30 +1,73 @@
-name: Publish to PyPI
+name: Full Auto Release + PyPI Publish
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
 
 permissions:
+  contents: write
   id-token: write
-  contents: read
 
 jobs:
-  publish:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 1. Get version from pyproject.toml
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(python -c "import re; print(re.search(r'version = \"(.*?)\"', open('pyproject.toml').read()).group(1))")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      # 2. Check if tag exists
+      - name: Check tag
+        run: |
+          git fetch --tags
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "Version already released"
+            exit 0
+          fi
+
+      # 3. Create Git tag
+      - name: Create tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag v${{ steps.version.outputs.version }}
+          git push origin v${{ steps.version.outputs.version }}
+
+      # 4. Create GitHub Release
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+
+  build-and-publish:
+    needs: release
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      # 5. Set up Python
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # 6. Install build tools
       - name: Install build tools
         run: pip install build
 
+      # 7. Build package
       - name: Build package
         run: python -m build
 
+      # 8. Publish to PyPI (Trusted Publisher - NO TOKEN)
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
