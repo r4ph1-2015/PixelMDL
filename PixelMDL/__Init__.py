@@ -30,3 +30,11 @@ def quiz():
 
 def dumby():
     print("9+10=21")
+
+def void():
+    print("Welcome to the Void")
+    answer4 = input("What do you think the void is?")
+    if answer4 == "Nothing":
+        print("Thats correct, thank you for trying the void challenge")
+    else:
+        print("Incorrect, Its Nothing but Thank you for trying the void challenge")
