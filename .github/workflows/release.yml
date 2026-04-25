@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   build-and-publish:
+    environment: production  # Add this if you registered with an environment
     runs-on: ubuntu-latest
 
     steps:
