@@ -1,5 +1,5 @@
 [project]
 name = "pixelmdl"
-version = "0.2.3a3"
+version = "0.2.3a4"
 description = "Enterprise Python package"
 authors = [{ name="r4ph1-2015" }]

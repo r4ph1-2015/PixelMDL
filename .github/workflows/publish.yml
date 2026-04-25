@@ -1,4 +1,4 @@
-name: Fully Automatic Release System
+name: Full CI/CD Auto Release System
 
 on:
   push:
@@ -11,9 +11,9 @@ permissions:
 jobs:
 
 # ---------------------------
-# 1. AUTO VERSION BUMP
+# CI: BUILD + VALIDATION
 # ---------------------------
-  version:
+  ci:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.ver.outputs.version }}
@@ -23,7 +23,41 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine next version
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build pytest
+
+      - name: Run tests
+        run: pytest || echo "No tests found"
+
+      - name: Build package
+        run: python -m build
+
+      - name: Validate dist
+        run: |
+          test -d dist || exit 1
+          ls dist
+
+# ---------------------------
+# CD: AUTO VERSION (NO RULES)
+# ---------------------------
+  version:
+    needs: ci
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Auto version bump (safe default = patch)
         id: ver
         run: |
           git fetch --tags
@@ -31,22 +65,11 @@ jobs:
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           VERSION=${LAST_TAG#v}
 
-          MSG=$(git log -1 --pretty=%B)
-
           python - <<EOF > next.txt
 major, minor, patch = map(int, "$VERSION".split("."))
 
-msg = """$MSG"""
-
-if msg.startswith("break:"):
-    major += 1
-    minor = 0
-    patch = 0
-elif msg.startswith("feat:"):
-    minor += 1
-    patch = 0
-else:
-    patch += 1
+# SAFE MODE: always patch bump (no commit rules)
+patch += 1
 
 print(f"v{major}.{minor}.{patch}")
 EOF
@@ -55,46 +78,16 @@ EOF
           echo "version=$NEXT" >> $GITHUB_OUTPUT
 
 # ---------------------------
-# 2. BUILD PACKAGE
-# ---------------------------
-  build:
-    needs: version
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install build tools
-        run: |
-          pip install build pytest
-
-      - name: Test
-        run: pytest || echo "No tests"
-
-      - name: Build package
-        run: python -m build
-
-      - name: Upload dist
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-# ---------------------------
-# 3. CREATE TAG + GITHUB RELEASE
+# TAG + RELEASE
 # ---------------------------
   release:
-    needs: [version, build]
+    needs: [ci, version]
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create Git tag
+      - name: Create tag
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
@@ -108,12 +101,12 @@ EOF
           generate_release_notes: true
 
 # ---------------------------
-# 4. TESTPYPI (NO APPROVAL)
+# TESTPYPI (NO APPROVAL)
 # ---------------------------
   publish-testpypi:
-    needs: build
+    needs: ci
     runs-on: ubuntu-latest
-    environment: production   # MUST MATCH YOUR PYPI TRUSTED PUBLISHER
+    environment: production
 
     steps:
       - uses: actions/download-artifact@v4
@@ -127,10 +120,10 @@ EOF
           repository-url: https://test.pypi.org/legacy/
 
 # ---------------------------
-# 5. PYPI (APPROVAL REQUIRED)
+# PYPI (APPROVAL REQUIRED)
 # ---------------------------
   publish-pypi:
-    needs: build
+    needs: ci
     runs-on: ubuntu-latest
     environment: release
 
