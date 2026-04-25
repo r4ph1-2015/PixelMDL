@@ -26,4 +26,4 @@ def quiz():
     if answer3 == "Python":
         print("That is correct, Thank you for trying out the Quiz Function")
     else:
-        print("Actually, It was built in Python. Thank you for trying out the Quiz Function")
+        print("Thats is incorrect but Thank you for trying out the Quiz Function")
