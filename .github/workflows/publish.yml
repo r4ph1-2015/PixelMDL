@@ -1,4 +1,4 @@
-name: Zero-Touch Release System
+name: Ultra Zero-Touch Release System
 
 on:
   push:
@@ -10,34 +10,42 @@ permissions:
 
 jobs:
 
-  validate:
+  prepare:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.ver.outputs.version }}
+      is_prerelease: ${{ steps.type.outputs.prerelease }}
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Extract version
-      - name: Get version
+      - name: Extract version
         id: ver
         run: |
           VERSION=$(python -c "import re; print(re.search(r'version = \"(.*?)\"', open('pyproject.toml').read()).group(1))")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      # Prevent duplicate releases
-      - name: Check duplicate version
+      - name: Detect prerelease
+        id: type
+        run: |
+          if [[ "${{ steps.ver.outputs.version }}" =~ [a-zA-Z] ]]; then
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Prevent duplicate release
         run: |
           git fetch --tags
           if git rev-parse "v${{ steps.ver.outputs.version }}" >/dev/null 2>&1; then
-            echo "Version already released → skipping"
+            echo "❌ Version already exists"
             exit 1
           fi
 
   quality:
-    needs: validate
+    needs: prepare
     runs-on: ubuntu-latest
 
     steps:
@@ -55,52 +63,42 @@ jobs:
       - name: Lint
         run: ruff check .
 
-      - name: Security scan (fixed)
+      - name: Security scan
         run: pip-audit --ignore-vuln CVE-2026-3219
 
-      - name: Run tests
-        run: pytest || echo "No tests found"
+      - name: Tests
+        run: pytest || echo "No tests"
 
   release:
-    needs: [validate, quality]
+    needs: [prepare, quality]
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Get version
-        id: ver
-        run: |
-          VERSION=$(python -c "import re; print(re.search(r'version = \"(.*?)\"', open('pyproject.toml').read()).group(1))")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      # Generate changelog
       - name: Generate changelog
         run: |
           echo "## 🚀 Release Notes" > CHANGELOG.md
           git log $(git describe --tags --abbrev=0 2>/dev/null || echo "")..HEAD --pretty=format:"- %s" >> CHANGELOG.md || echo "- Initial release" >> CHANGELOG.md
 
-      # Create tag
       - name: Create tag
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git tag -a "v${{ steps.ver.outputs.version }}" -m "Release v${{ steps.ver.outputs.version }}"
-          git push origin "v${{ steps.ver.outputs.version }}"
+          git tag v${{ needs.prepare.outputs.version }}
+          git push origin v${{ needs.prepare.outputs.version }}
 
-      # GitHub Release
-      - name: Create GitHub Release
+      - name: GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.ver.outputs.version }}
+          tag_name: v${{ needs.prepare.outputs.version }}
           body_path: CHANGELOG.md
-          generate_release_notes: true
 
   build:
     needs: release
     runs-on: ubuntu-latest
+    outputs:
+      has_dist: ${{ steps.check.outputs.exists }}
 
     steps:
       - uses: actions/checkout@v4
@@ -109,19 +107,49 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Build package
+      - name: Build
         run: |
           pip install build
           python -m build
 
-      - name: Upload artifacts
+      - name: Verify dist
+        id: check
+        run: |
+          if [ -d "dist" ] && [ "$(ls -A dist)" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ No build output"
+            exit 1
+          fi
+
+      - name: Upload dist
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
-  publish:
+  # 🧪 TESTPYPI (production env, no approval)
+  publish-testpypi:
     needs: build
+    if: needs.prepare.outputs.is_prerelease == 'true' && needs.build.outputs.has_dist == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  # 🛑 PYPI (release env, approval required)
+  publish-pypi:
+    needs: build
+    if: needs.prepare.outputs.is_prerelease == 'false' && needs.build.outputs.has_dist == 'true'
     runs-on: ubuntu-latest
     environment: release
 
@@ -129,6 +157,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: dist
+          path: dist
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

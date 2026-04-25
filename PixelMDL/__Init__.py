@@ -27,3 +27,6 @@ def quiz():
         print("That is correct, Thank you for trying out the Quiz Function")
     else:
         print("Thats is incorrect but Thank you for trying out the Quiz Function...")
+
+def dumby():
+    print("9+10=21")
