@@ -1,40 +1,30 @@
-name: Auto Release & Publish
+name: Publish to PyPI
 
 on:
-  push:
-    branches: [main]
+  release:
+    types: [published]
 
 permissions:
-  contents: write
   id-token: write
+  contents: read
 
 jobs:
-  release:
+  publish:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Get version from pyproject.toml
-        id: version
-        run: |
-          VERSION=$(grep -Po '(?<=version = ")[^"]*' pyproject.toml)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Check if tag exists
-        run: |
-          git fetch --tags
-          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-            echo "Tag exists, skipping"
-            exit 0
-          fi
-
-      - name: Create Git tag
-        run: |
-          git tag v${{ steps.version.outputs.version }}
-          git push origin v${{ steps.version.outputs.version }}
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          tag_name: v${{ steps.version.outputs.version }}
+          python-version: "3.11"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

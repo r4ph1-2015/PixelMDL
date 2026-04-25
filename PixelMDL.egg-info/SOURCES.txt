@@ -1,6 +1,0 @@
-pyproject.toml
-PixelMDL/__Init__.py
-PixelMDL.egg-info/PKG-INFO
-PixelMDL.egg-info/SOURCES.txt
-PixelMDL.egg-info/dependency_links.txt
-PixelMDL.egg-info/top_level.txt
