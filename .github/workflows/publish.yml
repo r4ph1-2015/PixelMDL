@@ -1,4 +1,4 @@
-name: SaaS Python CI/CD Pipeline
+name: Python CI/CD (Alpha/Beta/Stable)
 
 on:
   push:
@@ -11,13 +11,14 @@ permissions:
 jobs:
 
 # ===========================
-# CI (TEST + BUILD)
+# CI + BUILD + VERSION
 # ===========================
   ci:
     runs-on: ubuntu-latest
 
     outputs:
       version: ${{ steps.version.outputs.version }}
+      channel: ${{ steps.version.outputs.channel }}
 
     steps:
       - uses: actions/checkout@v4
@@ -36,18 +37,18 @@ jobs:
       - name: Run tests
         run: pytest || echo "No tests found"
 
-      - name: Lint (non-blocking)
+      - name: Lint
         run: ruff check . || true
 
 # ===========================
-# SAFE VERSION GENERATION (FIXED)
+# VERSIONING (SAFE + ALPHA/BETA SUPPORT)
 # ===========================
       - name: Generate version
         id: version
         run: |
           git fetch --tags
 
-          # only accept valid semver tags like v1.2.3
+          # get latest valid tag only
           LAST=$(git tag -l "v[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | head -n 1)
 
           if [ -z "$LAST" ]; then
@@ -56,36 +57,48 @@ jobs:
 
           V=${LAST#v}
 
-          VERSION=$(python -c "
-import re
+          IFS='.' read -r major minor patch <<< "$V"
 
-v = '$V'
+          # safe fallback
+          [[ "$major" =~ ^[0-9]+$ ]] || major=0
+          [[ "$minor" =~ ^[0-9]+$ ]] || minor=0
+          [[ "$patch" =~ ^[0-9]+$ ]] || patch=0
 
-# strict validation: only x.y.z allowed
-if not re.match(r'^\\d+\\.\\d+\\.\\d+$', v):
-    v = '0.0.0'
+          patch=$((patch + 1))
 
-major, minor, patch = map(int, v.split('.'))
-patch += 1
-print(f'v{major}.{minor}.{patch}')
-")
+          # detect alpha/beta from commit message
+          MSG=$(git log -1 --pretty=%B)
+
+          CHANNEL="stable"
+          SUFFIX=""
+
+          if [[ "$MSG" == *"alpha"* ]]; then
+            CHANNEL="alpha"
+            SUFFIX="a1"
+          elif [[ "$MSG" == *"beta"* ]]; then
+            CHANNEL="beta"
+            SUFFIX="b1"
+          fi
+
+          VERSION="v$major.$minor.$patch$SUFFIX"
 
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
 
 # ===========================
-# BUILD PACKAGE
+# BUILD
 # ===========================
       - name: Build package
         run: python -m build
 
-      - name: Upload dist artifact
+      - name: Upload dist
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
 # ===========================
-# RELEASE (TAG + CHANGELOG)
+# RELEASE (TAG + GITHUB RELEASE)
 # ===========================
   release:
     needs: ci
@@ -94,31 +107,33 @@ print(f'v{major}.{minor}.{patch}')
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate changelog
-        run: |
-          echo "## Release Notes" > CHANGELOG.md
-          git log $(git describe --tags --abbrev=0 2>/dev/null || echo "")..HEAD --pretty=format:"- %s" >> CHANGELOG.md || echo "- Initial release" >> CHANGELOG.md
+      - name: Get version
+        run: echo "VERSION=${{ needs.ci.outputs.version }}" >> $GITHUB_ENV
 
-      - name: Create Git tag
+      - name: Create changelog
+        run: |
+          echo "## Release $VERSION" > CHANGELOG.md
+          git log -1 --pretty=format:"- %s" >> CHANGELOG.md
+
+      - name: Create tag
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git tag ${{ needs.ci.outputs.version }}
-          git push origin ${{ needs.ci.outputs.version }}
+          git tag $VERSION
+          git push origin $VERSION
 
-      - name: Create GitHub Release
+      - name: GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.ci.outputs.version }}
+          tag_name: ${{ env.VERSION }}
           body_path: CHANGELOG.md
 
 # ===========================
-# TESTPYPI (STAGING)
+# TESTPYPI (ALPHA/BETA ONLY)
 # ===========================
   deploy_testpypi:
     needs: ci
     runs-on: ubuntu-latest
-    environment: production
 
     steps:
       - uses: actions/download-artifact@v4
@@ -126,17 +141,21 @@ print(f'v{major}.{minor}.{patch}')
           name: dist
           path: dist
 
-      - name: Publish to TestPyPI
+      - name: Publish to TestPyPI (alpha/beta/stable staging)
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
 
 # ===========================
-# PYPI (PRODUCTION - APPROVAL)
+# PYPI (ONLY STABLE RELEASES)
 # ===========================
   deploy_pypi:
     needs: ci
     runs-on: ubuntu-latest
+
+    # only publish stable versions (no alpha/beta)
+    if: ${{ !contains(needs.ci.outputs.version, 'a') && !contains(needs.ci.outputs.version, 'b') }}
+
     environment: release
 
     steps:
