@@ -38,3 +38,17 @@ def void():
         print("Thats correct, thank you for trying the void challenge")
     else:
         print("Incorrect, Its Nothing but Thank you for trying the void challenge")
+
+def nothing():
+    print("I think you ment Void instead of Nothing")
+    answer5 = input("Do you think you meant Void?")
+    if answer5 == "Yes":
+         void()
+    else:
+        print("Well Sadly I cant help with that. Try the Void Function instead")
+        answer6 = input("Would you like to try the Void Function?")
+        if answer6 == "Yes":
+             void()
+        else:
+            print("I cant help yous with that. I will repeat the Nothing Function")
+            nothing()

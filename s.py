@@ -1,3 +1,3 @@
 import pixelmdl as px
 
-px.quiz()
+px.nothing()
