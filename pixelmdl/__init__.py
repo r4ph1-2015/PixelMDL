@@ -52,3 +52,13 @@ def nothing():
         else:
             print("I cant help yous with that. I will repeat the Nothing Function")
             nothing()
+
+def lol():
+    print("This is nothing but a joke")
+    answer7 = input("Would you like to try the Nothing Function instead?")
+    if answer7 == "Yes":
+        print("ok")
+        nothing()
+    else:
+        print("Lets repeat the Lol Function")
+        lol()
