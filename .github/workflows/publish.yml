@@ -34,9 +34,11 @@ jobs:
           pip install --upgrade pip
           pip install build pytest ruff
 
+      - name: Test discovery check
+        run: pytest --collect-only -v
+
       - name: Run tests
-        run: |
-          pytest
+        run: pytest
 
       - name: Generate version
         id: version
