@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      version: ${{ steps.ver.outputs.version }}
-      channel: ${{ steps.ver.outputs.channel }}
+      version: ${{ steps.version.outputs.version }}
+      channel: ${{ steps.version.outputs.channel }}
 
     steps:
       - uses: actions/checkout@v4
@@ -27,21 +27,19 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install tools
         run: |
           pip install --upgrade pip
           pip install build pytest ruff
 
-      - name: Tests
-        run: pytest || true
+      - name: Run tests
+        run: |
+          pytest
 
-# =========================
-# VERSION SYSTEM (SAFE)
-# =========================
       - name: Generate version
-        id: ver
+        id: version
         run: |
           git fetch --tags
 
@@ -78,19 +76,17 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
 
-# =========================
-# BUILD PACKAGE
-# =========================
-      - name: Build
+      - name: Build package
         run: python -m build
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
 # =========================
-# TAG = VERSION (FIXED)
+# TAG CREATION
 # =========================
   tag:
     needs: build
@@ -99,7 +95,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Apply tag = version
+      - name: Create version tag
         run: |
           VERSION="${{ needs.build.outputs.version }}"
 
@@ -107,63 +103,33 @@ jobs:
           git config user.email "github-actions@github.com"
 
           if git rev-parse "$VERSION" >/dev/null 2>&1; then
-            echo "Tag exists → skipping"
+            echo "Tag $VERSION already exists. Skipping."
           else
             git tag "$VERSION"
             git push origin "$VERSION"
+            echo "Tag $VERSION created and pushed successfully."
           fi
 
 # =========================
-# GITHUB RELEASE (ALWAYS)
+# GITHUB RELEASE STEP
 # =========================
   github_release:
-    needs: build
+    needs: [build, tag]
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create GitHub Release
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.build.outputs.version }}
           name: Release ${{ needs.build.outputs.version }}
+          body: |
+            This release includes the following changes:
 
-# =========================
-# TESTPYPI (ALWAYS)
-# =========================
-  testpypi:
-    needs: build
-    runs-on: ubuntu-latest
+            - Auto-generated version from the pipeline.
+            - Build artifacts uploaded.
 
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist
-
-      - name: Publish TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-
-# =========================
-# PYPI (ONLY STABLE + APPROVAL)
-# =========================
-  pypi:
-    needs: build
-    runs-on: ubuntu-latest
-
-    if: ${{ !contains(needs.build.outputs.version, 'a') && !contains(needs.build.outputs.version, 'b') }}
-
-    environment:
-      name: production
-
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+          draft: false
+          prerelease: ${{ needs.build.outputs.channel != 'stable' }}
