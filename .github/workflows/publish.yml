@@ -2,8 +2,9 @@ name: Publish Python Package
 
 on:
   push:
-    tags:
-      - "v*.*.*" # Trigger on version tags like v1.2.3
+    branches:
+      - main
+      - master
 
 jobs:
   # ─────────────────────────────────────────────
@@ -34,7 +35,8 @@ jobs:
           path: dist/
 
   # ─────────────────────────────────────────────
-  # 2. Publish to TestPyPI automatically on every version tag
+  # 2. Publish to TestPyPI automatically on every push to main
+  #    skip-existing: true so re-pushes of the same version don't fail
   # ─────────────────────────────────────────────
   publish-testpypi:
     name: Publish → TestPyPI (automatic)
@@ -42,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
 
     environment:
-      name: testpypi
+      name: production
       url: https://test.pypi.org/p/${{ github.event.repository.name }}
 
     permissions:
@@ -59,9 +61,11 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
   # ─────────────────────────────────────────────
   # 3. Publish to PyPI only after manual approval
+  #    Gate is enforced by the "production" environment's required reviewers
   # ─────────────────────────────────────────────
   publish-pypi:
     name: Publish → PyPI (requires approval)
@@ -69,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
 
     environment:
-      name: pypi                                        # <── Protected environment: add required reviewers here
+      name: production                                  # <── Set required reviewers on this environment in repo Settings
       url: https://pypi.org/p/${{ github.event.repository.name }}
 
     permissions:
@@ -84,3 +88,5 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
